@@ -20,6 +20,7 @@ class DeckelPostConfig:
         self.output_line_numbers = True
         self.output_zero_points = False
         self.show_editor = True
+        self.override_rapid_feed = -1
 
         # --- Formatting ---
         self.precision = 3
@@ -139,6 +140,13 @@ class DeckelPostProcessor:
             if cmd.Name == "G54" and not self.cfg.output_zero_points:
                 continue
 
+            if cmd.Name == "G0" and self.cfg.override_rapid_feed > 0:
+                rapid_feed = Units.Quantity(
+                    float(self.cfg.override_rapid_feed), self.cfg.unit_speed_format
+                )
+                cmd.Parameters["F"] = rapid_feed.getValueAs(FreeCAD.Units.Velocity)
+                cmd.Name = "G1"
+
             command = DeckelDialect.translate(cmd.Name)
             if command is None:
                 continue
@@ -201,6 +209,8 @@ def build_argument_parser() -> argparse.ArgumentParser:
     p.add_argument("--axis-modal", action="store_true")
     p.add_argument("--no-tlo", action="store_true")
 
+    p.add_argument("--override-rapid-feed", type=int, default=-1)
+
     return p
 
 
@@ -217,6 +227,8 @@ def parse_arguments(argstring: str, cfg: DeckelPostConfig) -> None:
     cfg.modal = args.modal
     cfg.axis_modal = args.axis_modal
     cfg.use_tool_length_offset = not args.no_tlo
+
+    cfg.override_rapid_feed = args.override_rapid_feed
 
     if args.preamble is not None:
         cfg.preamble = args.preamble
