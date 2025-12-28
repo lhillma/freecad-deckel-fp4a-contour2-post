@@ -181,8 +181,13 @@ class DeckelPostProcessor:
             ):
                 sign = "+" if self.cfg.spindle_speed >= 0 else ""
                 words.append(f"S{sign}{int(round(self.cfg.spindle_speed))}")
-                self.cfg.last_spindle_speed = self.cfg.spindle_speed
 
+            # Remove movement command if it does not contain any X, Y or Z
+            if command in ("G00", "G01", "G02", "G03"):
+                if not any(p in word for p in ("X", "Y", "Z") for word in words):
+                    continue
+
+            self.cfg.last_spindle_speed = self.cfg.spindle_speed
             self.current_position.update(cmd.Parameters)
             last_command = command
 
