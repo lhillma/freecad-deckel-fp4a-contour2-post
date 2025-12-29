@@ -56,8 +56,8 @@ M30
 
         # --- Runtime state ---
         self.line_number = 0
-        self.spindle_speed = 0.0
-        self.last_spindle_speed = 0.0
+        self.spindle_speed = "+0"
+        self.last_spindle_speed = self.spindle_speed
 
         # --- Timestamp ---
         self.now = datetime.datetime.now()
@@ -106,20 +106,24 @@ class DeckelPostProcessor:
 
     def __init__(self, config: DeckelPostConfig):
         self.cfg = config
-        self.current_position: Dict[str, float] = {}
+        self.current_position: Dict[str, str] = {}
 
     def linenumber(self) -> str:
         return self.cfg.next_line_number()
 
     def format_length(self, value: float) -> str:
         q = Units.Quantity(value, FreeCAD.Units.Length)
-        scaled = q.getValueAs(self.cfg.unit_format)
-        return f"{int(round(scaled * 100)):+d}"
+        scaled = 100.0 * float(q.getValueAs(self.cfg.unit_format))
+        return f"{round(scaled):+d}"
 
-    def format_feed(self, value: float) -> Optional[str]:
+    def format_feed(self, value: float) -> str:
         q = Units.Quantity(value, FreeCAD.Units.Velocity)
         speed = q.getValueAs(self.cfg.unit_speed_format)
-        return None if speed <= 0 else f"{int(speed)}"
+        assert speed >= 0.0, "Feed rate cannot be negative"
+        return f"{int(speed)}"
+
+    def format_spindle_speed(self, value: float) -> str:
+        return f"{int(round(value)):+d}"
 
     def parse_path(self, pathobj) -> str:
         output = []
@@ -129,8 +133,8 @@ class DeckelPostProcessor:
             # spindle commands
             if cmd.Name in ("M3", "M4"):
                 direction = 1.0 if cmd.Name == "M3" else -1.0
-                self.cfg.spindle_speed = direction * float(
-                    cmd.Parameters.get("S", self.cfg.spindle_speed)
+                self.cfg.spindle_speed = self.format_spindle_speed(
+                    direction * float(cmd.Parameters.get("S", self.cfg.spindle_speed))
                 )
                 continue
 
@@ -164,23 +168,26 @@ class DeckelPostProcessor:
 
                 if p == "F":
                     feed = self.format_feed(value)
-                    if feed and cmd.Name not in ("G0", "G00"):
+                    if feed != self.current_position.get("F") and cmd.Name not in (
+                        "G0",
+                        "G00",
+                    ):
                         words.append(f"F{feed}")
                 elif p in ("T", "H", "D", "S"):
                     words.append(f"{p}{int(value)}")
-                else:
-                    if (
-                        not self.cfg.axis_modal
-                        and self.current_position.get(p) == value
-                    ):
+                elif p in ("X", "Y", "Z"):
+                    if not self.cfg.axis_modal and self.current_position.get(
+                        p
+                    ) == self.format_length(value):
                         continue
+                    words.append(p + self.format_length(value))
+                else:
                     words.append(p + self.format_length(value))
 
             if command.startswith("G") and (
                 self.cfg.spindle_speed != self.cfg.last_spindle_speed
             ):
-                sign = "+" if self.cfg.spindle_speed >= 0 else ""
-                words.append(f"S{sign}{int(round(self.cfg.spindle_speed))}")
+                words.append(f"S{self.cfg.spindle_speed}")
 
             # Remove movement command if it does not contain any X, Y or Z
             if command in ("G00", "G01", "G02", "G03"):
@@ -188,7 +195,18 @@ class DeckelPostProcessor:
                     continue
 
             self.cfg.last_spindle_speed = self.cfg.spindle_speed
-            self.current_position.update(cmd.Parameters)
+            self.current_position.update(
+                {
+                    k: self.format_length(cmd.Parameters[k])
+                    for k in ("X", "Y", "Z")
+                    if k in cmd.Parameters
+                }
+            )
+            self.current_position.update(
+                {"F": self.format_feed(cmd.Parameters["F"])}
+                if "F" in cmd.Parameters
+                else {}
+            )
             last_command = command
 
             if words:
