@@ -21,6 +21,7 @@ class DeckelPostConfig:
         self.output_zero_points = False
         self.show_editor = True
         self.override_rapid_feed = -1
+        self.allow_xz_moves = False
 
         # --- Formatting ---
         self.precision = 3
@@ -190,19 +191,45 @@ class DeckelPostProcessor:
                 else:
                     parameters_and_values.append((p, self.format_length(value)))
 
-            if any(p == "Z" for p, _ in parameters_and_values) and any(
-                p == "Y" for p, _ in parameters_and_values
+            if any(p == "Z" for p, _ in parameters_and_values) and (
+                any(p == "Y" for p, _ in parameters_and_values)
+                or (
+                    not self.cfg.allow_xz_moves
+                    and any(p == "X" for p, _ in parameters_and_values)
+                )
             ):
-                # move in X-Y plane first, then Z
-                y_value = next(v for p, v in parameters_and_values if p == "Y")
+                x_value = (
+                    next(v for p, v in parameters_and_values if p == "X")
+                    if any(p == "X" for p, _ in parameters_and_values)
+                    else None
+                )
+                y_value = (
+                    next(v for p, v in parameters_and_values if p == "Y")
+                    if any(p == "Y" for p, _ in parameters_and_values)
+                    else None
+                )
                 z_value = next(v for p, v in parameters_and_values if p == "Z")
-                parameters_and_values.remove(("Z", z_value))
-                lines.append([command, f"Z{z_value}"])
+
+                # if z moves up, do it first. Else do x-y plane first
+                if int(z_value) > int(self.current_position.get("Z", "+0")):
+                    parameters_and_values.remove(("Z", z_value))
+                    lines.append([command, f"Z{z_value}"])
+                else:
+                    if x_value is not None:
+                        parameters_and_values.remove(("X", x_value))
+                    if y_value is not None:
+                        parameters_and_values.remove(("Y", y_value))
+
+                    lines.append(
+                        [command]
+                        + ([f"X{x_value}"] if x_value is not None else [])
+                        + ([f"Y{y_value}"] if y_value is not None else [])
+                    )
 
                 print(
                     f"Info: Line {self.cfg.line_number + 1}: "
-                    f"Splitting up {command} with Y-Z movement: "
-                    f"Y{y_value} Z{z_value}"
+                    f"Splitting up {command} with X-Y-Z movement: "
+                    f"X{x_value} Y{y_value} Z{z_value}"
                 )
 
             for p, v in parameters_and_values:
@@ -244,6 +271,11 @@ class DeckelPostProcessor:
                     assert ("Z" not in parsed_line) or ("Y" not in parsed_line), (
                         "Deckel FP4A cannot move Z and Y simultaneously."
                     )
+                    assert (
+                        self.cfg.allow_xz_moves
+                        or ("Z" not in parsed_line)
+                        or ("X" not in parsed_line)
+                    ), "Simultaneous X and Z moves are not allowed."
                     output.append(parsed_line)
 
         return "\n".join(output) if output and output[1] else ""
@@ -256,6 +288,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-line-numbers", action="store_true")
     p.add_argument("--no-show-editor", action="store_true")
     p.add_argument("--include-zero-points", action="store_true")
+    p.add_argument("--allow-xz-moves", action="store_true")
 
     p.add_argument("--precision", type=int, default=3)
     p.add_argument("--preamble")
@@ -279,6 +312,7 @@ def parse_arguments(argstring: str, cfg: DeckelPostConfig) -> None:
     cfg.output_line_numbers = not args.no_line_numbers
     cfg.output_zero_points = args.include_zero_points
     cfg.show_editor = not args.no_show_editor
+    cfg.allow_xz_moves = args.allow_xz_moves
 
     cfg.precision = args.precision
     cfg.modal = not args.no_modal
