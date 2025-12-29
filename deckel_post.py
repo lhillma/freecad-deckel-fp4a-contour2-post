@@ -155,10 +155,8 @@ class DeckelPostProcessor:
             if command is None:
                 continue
 
-            words = [command]
-
-            if self.cfg.modal and command == last_command:
-                words.pop()
+            lines = [[command]]
+            parameters_and_values = []
 
             for p in self.PARAMETER_ORDER:
                 if p not in cmd.Parameters:
@@ -168,30 +166,62 @@ class DeckelPostProcessor:
 
                 if p == "F":
                     feed = self.format_feed(value)
-                    if feed != self.current_position.get("F") and cmd.Name not in (
-                        "G0",
-                        "G00",
+                    if self.cfg.modal and (
+                        feed == self.current_position.get("F")
+                        or cmd.Name
+                        in (
+                            "G0",
+                            "G00",
+                        )
                     ):
-                        words.append(f"F{feed}")
-                elif p in ("T", "H", "D", "S"):
-                    words.append(f"{p}{int(value)}")
+                        continue
+                    parameters_and_values.append((p, feed))
+                elif p in ("T", "H", "D"):
+                    print(f"Warning: Unhandled parameter {p} with value {value}")
+                    # parameters_and_values.append((p, int(value)))
+                elif p == "S":
+                    self.cfg.spindle_speed = self.format_spindle_speed(float(value))
                 elif p in ("X", "Y", "Z"):
-                    if not self.cfg.axis_modal and self.current_position.get(
+                    if self.cfg.axis_modal and self.current_position.get(
                         p
                     ) == self.format_length(value):
                         continue
-                    words.append(p + self.format_length(value))
+                    parameters_and_values.append((p, self.format_length(value)))
                 else:
-                    words.append(p + self.format_length(value))
+                    parameters_and_values.append((p, self.format_length(value)))
+
+            if any(p == "Z" for p, _ in parameters_and_values) and any(
+                p == "Y" for p, _ in parameters_and_values
+            ):
+                # move in X-Y plane first, then Z
+                y_value = next(v for p, v in parameters_and_values if p == "Y")
+                z_value = next(v for p, v in parameters_and_values if p == "Z")
+                parameters_and_values.remove(("Z", z_value))
+                lines.append([command, f"Z{z_value}"])
+
+                print(
+                    f"Info: Line {self.cfg.line_number + 1}: "
+                    f"Splitting up {command} with Y-Z movement: "
+                    f"Y{y_value} Z{z_value}"
+                )
+
+            for p, v in parameters_and_values:
+                lines[0].append(f"{p}{v}")
 
             if command.startswith("G") and (
-                self.cfg.spindle_speed != self.cfg.last_spindle_speed
+                (self.cfg.spindle_speed != self.cfg.last_spindle_speed)
+                or not self.cfg.modal
             ):
-                words.append(f"S{self.cfg.spindle_speed}")
+                lines[0].append(f"S{self.cfg.spindle_speed}")
 
             # Remove movement command if it does not contain any X, Y or Z
             if command in ("G00", "G01", "G02", "G03"):
-                if not any(p in word for p in ("X", "Y", "Z") for word in words):
+                if not any(
+                    p in word
+                    for p in ("X", "Y", "Z")
+                    for line in lines
+                    for word in line
+                ):
                     continue
 
             self.cfg.last_spindle_speed = self.cfg.spindle_speed
@@ -207,10 +237,14 @@ class DeckelPostProcessor:
                 if "F" in cmd.Parameters
                 else {}
             )
-            last_command = command
 
-            if words:
-                output.append(self.linenumber() + " ".join(words))
+            for line in lines:
+                if line:
+                    parsed_line = self.linenumber() + " ".join(line)
+                    assert ("Z" not in parsed_line) or ("Y" not in parsed_line), (
+                        "Deckel FP4A cannot move Z and Y simultaneously."
+                    )
+                    output.append(parsed_line)
 
         return "\n".join(output) if output and output[1] else ""
 
@@ -228,8 +262,8 @@ def build_argument_parser() -> argparse.ArgumentParser:
     p.add_argument("--postamble")
 
     p.add_argument("--inches", action="store_true")
-    p.add_argument("--modal", action="store_true")
-    p.add_argument("--axis-modal", action="store_true")
+    p.add_argument("--no-modal", action="store_true")
+    p.add_argument("--no-axis-modal", action="store_true")
     p.add_argument("--no-tlo", action="store_true")
 
     p.add_argument("--override-rapid-feed", type=int, default=-1)
@@ -247,8 +281,8 @@ def parse_arguments(argstring: str, cfg: DeckelPostConfig) -> None:
     cfg.show_editor = not args.no_show_editor
 
     cfg.precision = args.precision
-    cfg.modal = args.modal
-    cfg.axis_modal = args.axis_modal
+    cfg.modal = not args.no_modal
+    cfg.axis_modal = not args.no_axis_modal
     cfg.use_tool_length_offset = not args.no_tlo
 
     cfg.override_rapid_feed = args.override_rapid_feed
