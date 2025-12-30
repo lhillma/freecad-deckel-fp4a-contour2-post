@@ -212,9 +212,6 @@ class DeckelPostProcessor:
 
                 # if z moves up, do it first. Else do x-y plane first
                 if int(z_value) > int(self.current_position.get("Z", "+0")):
-                    parameters_and_values.remove(("Z", z_value))
-                    lines.append([command, f"Z{z_value}"])
-                else:
                     if x_value is not None:
                         parameters_and_values.remove(("X", x_value))
                     if y_value is not None:
@@ -225,6 +222,9 @@ class DeckelPostProcessor:
                         + ([f"X{x_value}"] if x_value is not None else [])
                         + ([f"Y{y_value}"] if y_value is not None else [])
                     )
+                else:
+                    parameters_and_values.remove(("Z", z_value))
+                    lines.append([command, f"Z{z_value}"])
 
                 print(
                     f"Info: Line {self.cfg.line_number + 1}: "
