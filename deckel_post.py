@@ -114,7 +114,7 @@ class DeckelPostProcessor:
 
     def format_length(self, value: float) -> str:
         q = Units.Quantity(value, FreeCAD.Units.Length)
-        scaled = 100.0 * float(q.getValueAs(self.cfg.unit_format))
+        scaled = 1000.0 * float(q.getValueAs(self.cfg.unit_format))
         return f"{round(scaled):+d}"
 
     def format_feed(self, value: float) -> str:
