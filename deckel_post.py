@@ -278,7 +278,7 @@ class DeckelPostProcessor:
                     ), "Simultaneous X and Z moves are not allowed."
                     output.append(parsed_line)
 
-        return "\n".join(output) if output and output[1] else ""
+        return "\n".join(output) if output and output[0] else ""
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
