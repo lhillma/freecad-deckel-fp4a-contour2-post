@@ -77,6 +77,7 @@ class DeckelDialect:
         "G2": "G02",
         "G3": "G03",
         "G54": "G54",
+        "G81": "G81",
     }
 
     @classmethod
@@ -97,12 +98,11 @@ class DeckelPostProcessor:
         "F",
         "S",
         "T",
-        "H",
-        "D",
-        "R",
-        "L",
-        "P",
-        "Q",
+        # "H",
+        # "D",
+        # "L",
+        # "P",
+        # "Q",
     ]
 
     def __init__(self, config: DeckelPostConfig):
